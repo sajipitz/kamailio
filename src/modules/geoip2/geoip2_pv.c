@@ -496,3 +496,53 @@ int geoip2_update_pv(str *tomatch, str *name)
 	return 1;
 }
 
+int geoip2_locate(str *tomatch, geoip_data_t *geoip_data) 
+{
+    MMDB_lookup_result_s result;
+    MMDB_entry_data_s entry_data;
+    char src[256]; 
+    int gai_error, mmdb_error;
+
+    if(tomatch->len>255)
+    {
+        LM_ERR("target too long (max 255): %s\n", tomatch->s);
+              return -3;
+    } 
+    
+    memset(src, 0, sizeof(src));
+    strncpy(src, tomatch->s, tomatch->len);
+    result = MMDB_lookup_string(&_handle_GeoIP, (const char*)src, &gai_error, &mmdb_error);
+    if (gai_error || MMDB_SUCCESS != mmdb_error || !result.found_entry)
+    {
+        LM_ERR("no match for: %s\n", src);
+        return -2;
+    }
+
+    if(MMDB_get_value(&result.entry, &entry_data,"country","iso_code", NULL) == MMDB_SUCCESS
+                      || MMDB_get_value(&result.entry, &entry_data, "registered_country","iso_code", NULL) == MMDB_SUCCESS) { 
+
+                                if(entry_data.has_data && entry_data.type == MMDB_DATA_TYPE_UTF8_STRING) {
+                                        geoip_data->country.s = (char *)entry_data.utf8_string;
+                                        geoip_data->country.len = entry_data.data_size;
+                                }
+
+                                if(MMDB_get_value(&result.entry, &entry_data,
+                                        "traits","is_anonymous_proxy", NULL) == MMDB_SUCCESS
+                                        && entry_data.has_data && entry_data.type == MMDB_DATA_TYPE_BOOLEAN
+                                        && entry_data.boolean) {
+                                        geoip_data->country.s = "A1";
+                                        geoip_data->country.len = 2;
+                                }
+    }
+
+    if(MMDB_get_value(&result.entry, &entry_data,
+                      "city","names","en", 
+                      NULL) == MMDB_SUCCESS) {
+        if(entry_data.has_data && entry_data.type == MMDB_DATA_TYPE_UTF8_STRING) {
+             geoip_data->city.s = (char *)entry_data.utf8_string;
+             geoip_data->city.len = entry_data.data_size;
+        }        
+    }
+
+    return 1;
+}
