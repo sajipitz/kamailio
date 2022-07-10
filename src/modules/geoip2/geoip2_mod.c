@@ -41,12 +41,11 @@
 MODULE_VERSION
 
 #define pi 3.14159265358979323846
-#define MAX_TENANT_ENTRIES  256
+#define MAX_TENANT_ENTRIES  512
 #define STR_LOCATION_LEN 128
 #define MAX_LOCATION_PER_TENANT 5
 #define GEOIP_CC_INDIA "IN"
 
-#define geoip_compute_hash(s) get_hash1_raw(s, strlen(s)) 
 #define geoip_tenant_tbl_index(_h)  ((_h)&((MAX_TENANT_ENTRIES)-1))
 
 typedef struct _geoip_tenant_info {
@@ -111,6 +110,16 @@ struct module_exports exports = {
 	0,					/* per-child init function */
 	mod_destroy			/* module destroy function */
 };
+
+static unsigned long djb2_hash(char* str) {
+    unsigned long hash = 5381;
+    int c;
+    while (c = *str++) {
+        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+    }
+
+    return hash & (MAX_TENANT_ENTRIES - 1);
+}
 
 /**
  * init module function
@@ -287,9 +296,9 @@ static int geoip2_tenant_fence_init()
                 continue; 
             }
             sscanf(line, "%s %lf %c %[^\n]s", realm, &radius, &type, location);
-            hash = geoip_compute_hash(realm);
+            hash = djb2_hash(realm);
             slot = geoip_tenant_tbl_index(hash);
-            // LM_INFO("GeoIP Init slot: %d \n", slot);
+            LM_INFO("GeoIP Init slot: %s %d \n", realm, slot);
             record = &g_tenant_tbl->entries[slot];
             record->range = radius;
             record->type = type;
@@ -378,7 +387,7 @@ static int geoip2_tenant_loc_filter(sip_msg_t* msg, char* target, char* pvname, 
         memset(src, 0, sizeof(src));
         strncpy(src, tomatch.s, tomatch.len);
 
-        hash = geoip_compute_hash(realm);
+        hash = djb2_hash(realm);
         slot = geoip_tenant_tbl_index(hash);
         record = &g_tenant_tbl->entries[slot];
         if (record->realm == 0 || record->loc_count == 0) {
@@ -407,6 +416,7 @@ static int geoip2_tenant_loc_filter(sip_msg_t* msg, char* target, char* pvname, 
                 return -1;
             }
             
+            LM_INFO("Record classify %s %c \n", record->realm, record->type);
             if (record->type == 'G') {
                 /*
                  * Incoming traffic
@@ -483,7 +493,7 @@ static int geoip2_tenant_filter(sip_msg_t* msg, char* target, char* pvname, char
         realm[from_domain.len] = '\0';
         LM_INFO("GeoIP From Domain %s %d \n", realm, from_domain.len);
 
-        hash = geoip_compute_hash(realm);
+        hash = djb2_hash(realm);
         slot = geoip_tenant_tbl_index(hash);
         record = &g_tenant_tbl->entries[slot];
         if (record->realm == 0 || record->loc_count == 0) {
